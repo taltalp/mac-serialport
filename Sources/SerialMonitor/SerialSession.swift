@@ -21,6 +21,7 @@ final class SerialSession: ObservableObject, Identifiable {
     @Published var lineEnding: LineEnding = .crlf
     @Published var showTimestamps = true
     @Published var showDirections = true
+    @Published var showControlCodeChips = false
     @Published var autoScroll = true
     @Published var sendText = ""
     @Published private(set) var sendError: String?

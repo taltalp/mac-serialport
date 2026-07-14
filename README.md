@@ -15,9 +15,10 @@ A lightweight native macOS serial terminal for Arduino boards, microcontrollers,
 - Automatic discovery and refresh of `/dev/cu.*` serial ports
 - Baud rate, data bits, parity, stop bits, and flow-control settings
 - LF, CR, CR+LF, or no line ending for ASCII transmission
-- ASCII, hexadecimal, and combined ASCII + HEX display modes
+- ASCII, hexadecimal, and side-by-side ASCII + HEX display modes
 - ASCII and hexadecimal input modes
 - Optional receive timestamps and RX/TX direction markers
+- Optional control-code chips for CR, LF, TAB, NUL, ESC, and other C0 bytes
 - Real-time log recording to a user-selected file
 - Multiple simultaneous serial connections in separate tabs
 - Per-tab connection and display settings

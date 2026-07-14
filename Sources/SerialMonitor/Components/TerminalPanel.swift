@@ -26,21 +26,61 @@ struct TerminalPanel: View {
             .frame(height: 42)
             Divider()
 
-            TerminalTextView(
-                content: TerminalAttributedFormatter.make(
-                    entries: session.entries,
-                    mode: session.displayMode,
-                    showTimestamps: session.showTimestamps,
-                    showDirections: session.showDirections
-                ),
-                autoScroll: session.autoScroll
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            logView
 
             Divider()
             SendBar(session: session)
         }
         .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    @ViewBuilder
+    private var logView: some View {
+        if session.displayMode == .asciiAndHex {
+            HSplitView {
+                splitLogPane(title: "ASCII", mode: .ascii)
+                splitLogPane(title: "HEX", mode: .hex)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            TerminalTextView(
+                content: formattedLog(mode: session.displayMode),
+                autoScroll: session.autoScroll
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func splitLogPane(title: String, mode: DataDisplayMode) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 30)
+            .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
+            TerminalTextView(
+                content: formattedLog(mode: mode),
+                autoScroll: session.autoScroll
+            )
+        }
+        .frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func formattedLog(mode: DataDisplayMode) -> NSAttributedString {
+        TerminalAttributedFormatter.make(
+            entries: session.entries,
+            mode: mode,
+            showTimestamps: session.showTimestamps,
+            showDirections: session.showDirections,
+            showControlCodeChips: session.showControlCodeChips
+        )
     }
 }
 
@@ -101,7 +141,8 @@ private enum TerminalAttributedFormatter {
         entries: [SerialLogEntry],
         mode: DataDisplayMode,
         showTimestamps: Bool,
-        showDirections: Bool
+        showDirections: Bool,
+        showControlCodeChips: Bool
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
         let baseFont = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
@@ -142,15 +183,26 @@ private enum TerminalAttributedFormatter {
                 ))
             }
 
-            let text: String
-            if entry.direction == .system {
-                text = SerialDataFormatter.asciiString(from: entry.data)
+            if showControlCodeChips, mode == .ascii {
+                let endsWithLineBreak = appendASCIIWithControlCodeChips(
+                    entry.data,
+                    to: result,
+                    attributes: bodyAttributes
+                )
+                if !endsWithLineBreak {
+                    result.append(NSAttributedString(string: "\n", attributes: bodyAttributes))
+                }
             } else {
-                text = SerialDataFormatter.string(from: entry.data, mode: mode)
-            }
-            result.append(NSAttributedString(string: text, attributes: bodyAttributes))
-            if !text.hasSuffix("\n") {
-                result.append(NSAttributedString(string: "\n", attributes: bodyAttributes))
+                let text: String
+                if entry.direction == .system {
+                    text = SerialDataFormatter.asciiDisplayString(from: entry.data)
+                } else {
+                    text = SerialDataFormatter.string(from: entry.data, mode: mode)
+                }
+                result.append(NSAttributedString(string: text, attributes: bodyAttributes))
+                if !text.hasSuffix("\n") {
+                    result.append(NSAttributedString(string: "\n", attributes: bodyAttributes))
+                }
             }
         }
 
@@ -164,5 +216,79 @@ private enum TerminalAttributedFormatter {
             ))
         }
         return result
+    }
+
+    private static func appendASCIIWithControlCodeChips(
+        _ data: Data,
+        to result: NSMutableAttributedString,
+        attributes: [NSAttributedString.Key: Any]
+    ) -> Bool {
+        var plainText = ""
+
+        func flushPlainText() {
+            guard !plainText.isEmpty else { return }
+            result.append(NSAttributedString(string: plainText, attributes: attributes))
+            plainText.removeAll(keepingCapacity: true)
+        }
+
+        for byte in data {
+            if let label = SerialDataFormatter.controlCodeLabel(for: byte) {
+                flushPlainText()
+                result.append(ControlCodeChipRenderer.attributedString(for: label))
+                if byte == 0x0A {
+                    result.append(NSAttributedString(string: "\n", attributes: attributes))
+                }
+            } else if (0x20...0x7E).contains(byte) {
+                plainText.append(Character(UnicodeScalar(byte)))
+            } else {
+                plainText.append("·")
+            }
+        }
+
+        flushPlainText()
+        return data.last == 0x0A
+    }
+}
+
+@MainActor
+private enum ControlCodeChipRenderer {
+    private static var attachmentCache: [String: NSTextAttachment] = [:]
+
+    static func attributedString(for label: String) -> NSAttributedString {
+        if let attachment = attachmentCache[label] {
+            return NSAttributedString(attachment: attachment)
+        }
+
+        let font = NSFont.monospacedSystemFont(ofSize: 9.5, weight: .semibold)
+        let textAttributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.labelColor
+        ]
+        let textSize = (label as NSString).size(withAttributes: textAttributes)
+        let imageSize = NSSize(width: ceil(textSize.width) + 12, height: 17)
+        let image = NSImage(size: imageSize, flipped: true) { bounds in
+            let chipRect = bounds.insetBy(dx: 1, dy: 1.5)
+            let chipPath = NSBezierPath(roundedRect: chipRect, xRadius: 4.5, yRadius: 4.5)
+            NSColor.controlAccentColor.withAlphaComponent(0.16).setFill()
+            chipPath.fill()
+            NSColor.controlAccentColor.withAlphaComponent(0.42).setStroke()
+            chipPath.lineWidth = 0.8
+            chipPath.stroke()
+
+            let textOrigin = NSPoint(
+                x: floor((bounds.width - textSize.width) / 2),
+                y: floor((bounds.height - textSize.height) / 2)
+            )
+            (label as NSString).draw(at: textOrigin, withAttributes: textAttributes)
+            return true
+        }
+
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = NSRect(origin: NSPoint(x: 0, y: -3), size: imageSize)
+        attachment.lineLayoutPadding = 1
+        attachment.allowsTextAttachmentView = false
+        attachmentCache[label] = attachment
+        return NSAttributedString(attachment: attachment)
     }
 }

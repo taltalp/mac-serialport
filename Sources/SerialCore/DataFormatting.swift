@@ -47,12 +47,45 @@ public enum SerialDataFormatter {
     public static func string(from data: Data, mode: DataDisplayMode) -> String {
         switch mode {
         case .ascii:
-            asciiString(from: data)
+            asciiDisplayString(from: data)
         case .hex:
             hexString(from: data)
         case .asciiAndHex:
-            "\(asciiString(from: data))    [\(hexString(from: data))]"
+            "\(asciiDisplayString(from: data))    [\(hexString(from: data))]"
         }
+    }
+
+    public static func asciiDisplayString(from data: Data) -> String {
+        let bytes = [UInt8](data)
+        var result = ""
+        result.reserveCapacity(bytes.count)
+        var index = 0
+
+        while index < bytes.count {
+            let byte = bytes[index]
+            switch byte {
+            case 0x0D:
+                result.append("\n")
+                if index + 1 < bytes.count, bytes[index + 1] == 0x0A {
+                    index += 2
+                } else {
+                    index += 1
+                }
+            case 0x0A:
+                result.append("\n")
+                index += 1
+            case 0x09:
+                result.append("\t")
+                index += 1
+            case 0x20...0x7E:
+                result.append(Character(UnicodeScalar(byte)))
+                index += 1
+            default:
+                result.append("·")
+                index += 1
+            }
+        }
+        return result
     }
 
     public static func asciiString(from data: Data) -> String {
@@ -80,6 +113,23 @@ public enum SerialDataFormatter {
 
     public static func hexString(from data: Data) -> String {
         data.map { String(format: "%02X", $0) }.joined(separator: " ")
+    }
+
+    public static func controlCodeLabel(for byte: UInt8) -> String? {
+        let c0Labels = [
+            "NUL", "SOH", "STX", "ETX", "EOT", "ENQ", "ACK", "BEL",
+            "BS", "TAB", "LF", "VT", "FF", "CR", "SO", "SI",
+            "DLE", "DC1", "DC2", "DC3", "DC4", "NAK", "SYN", "ETB",
+            "CAN", "EM", "SUB", "ESC", "FS", "GS", "RS", "US"
+        ]
+
+        if byte < 0x20 {
+            return c0Labels[Int(byte)]
+        }
+        if byte == 0x7F {
+            return "DEL"
+        }
+        return nil
     }
 
     public static func timestamp(_ date: Date) -> String {

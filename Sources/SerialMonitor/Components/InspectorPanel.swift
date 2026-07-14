@@ -22,6 +22,9 @@ struct InspectorPanel: View {
 
                         Toggle("受信日時", isOn: $session.showTimestamps)
                         Toggle("送受信方向", isOn: $session.showDirections)
+                        Toggle("制御コードを表示", isOn: $session.showControlCodeChips)
+                            .disabled(session.displayMode == .hex)
+                            .help("CR・LF・TAB・NULなどをASCII表示内で可視化します")
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 4)

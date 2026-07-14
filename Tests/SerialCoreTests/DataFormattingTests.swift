@@ -39,4 +39,30 @@ struct DataFormattingTests {
         let text = SerialDataFormatter.asciiString(from: Data([0x41, 0x00, 0x42, 0x0A]))
         #expect(text == "A·B\n")
     }
+
+    @Test("ASCII表示ではCRLFを1回の改行として扱う")
+    func normalizeCRLFForDisplay() {
+        let text = SerialDataFormatter.string(
+            from: Data([0x41, 0x0D, 0x0A, 0x42]),
+            mode: .ascii
+        )
+        #expect(text == "A\nB")
+    }
+
+    @Test("保存用ASCIIはCRLFを区別できる状態で維持する")
+    func preserveCRLFForPersistence() {
+        let text = SerialDataFormatter.asciiString(from: Data([0x41, 0x0D, 0x0A, 0x42]))
+        #expect(text == "A\r\nB")
+    }
+
+    @Test("制御コードを表示用ラベルへ変換する")
+    func formatControlCodeLabels() {
+        #expect(SerialDataFormatter.controlCodeLabel(for: 0x00) == "NUL")
+        #expect(SerialDataFormatter.controlCodeLabel(for: 0x09) == "TAB")
+        #expect(SerialDataFormatter.controlCodeLabel(for: 0x0A) == "LF")
+        #expect(SerialDataFormatter.controlCodeLabel(for: 0x0D) == "CR")
+        #expect(SerialDataFormatter.controlCodeLabel(for: 0x1B) == "ESC")
+        #expect(SerialDataFormatter.controlCodeLabel(for: 0x7F) == "DEL")
+        #expect(SerialDataFormatter.controlCodeLabel(for: 0x41) == nil)
+    }
 }
