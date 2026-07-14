@@ -1,5 +1,9 @@
 # Serial Monitor for macOS
 
+<p align="center">
+  <img src="Packaging/AppIcon.png" alt="Serial Monitor app icon" width="160">
+</p>
+
 A lightweight native macOS serial terminal for Arduino boards, microcontrollers, and other serial devices. It provides a practical GUI alternative to command-line tools such as `screen`, while keeping all communication local to your Mac.
 
 ![Serial Monitor main window](docs/images/serial-monitor.png)
