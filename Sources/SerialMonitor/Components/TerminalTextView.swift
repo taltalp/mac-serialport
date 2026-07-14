@@ -5,6 +5,10 @@ struct TerminalTextView: NSViewRepresentable {
     let content: NSAttributedString
     let autoScroll: Bool
 
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
@@ -35,11 +39,66 @@ struct TerminalTextView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
-        if !textView.attributedString().isEqual(to: content) {
+        let contentChanged = !textView.attributedString().isEqual(to: content)
+        if contentChanged {
             textView.textStorage?.setAttributedString(content)
         }
-        if autoScroll {
-            textView.scrollToEndOfDocument(nil)
+
+        let autoScrollBecameEnabled = autoScroll && !context.coordinator.wasAutoScrollEnabled
+        context.coordinator.wasAutoScrollEnabled = autoScroll
+
+        if autoScroll, contentChanged || autoScrollBecameEnabled {
+            context.coordinator.scheduleScrollToBottom(
+                scrollView: scrollView,
+                textView: textView
+            )
+        } else if !autoScroll {
+            context.coordinator.cancelPendingScroll()
+        }
+    }
+
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        coordinator.cancelPendingScroll()
+    }
+
+    @MainActor
+    final class Coordinator {
+        var wasAutoScrollEnabled = false
+        private var pendingScrollTask: Task<Void, Never>?
+
+        func scheduleScrollToBottom(scrollView: NSScrollView, textView: NSTextView) {
+            pendingScrollTask?.cancel()
+            pendingScrollTask = Task { @MainActor [weak scrollView, weak textView] in
+                await Task.yield()
+                guard
+                    !Task.isCancelled,
+                    let scrollView,
+                    let textView,
+                    let textContainer = textView.textContainer,
+                    let layoutManager = textView.layoutManager
+                else { return }
+
+                layoutManager.ensureLayout(for: textContainer)
+
+                let usedRect = layoutManager.usedRect(for: textContainer)
+                let horizontalInset = textView.textContainerInset.width * 2
+                let verticalInset = textView.textContainerInset.height * 2
+                textView.setFrameSize(NSSize(
+                    width: max(scrollView.contentSize.width, ceil(usedRect.maxX + horizontalInset)),
+                    height: max(scrollView.contentSize.height, ceil(usedRect.maxY + verticalInset))
+                ))
+                scrollView.layoutSubtreeIfNeeded()
+
+                let clipView = scrollView.contentView
+                let bottomY = max(0, textView.frame.height - clipView.bounds.height)
+                clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: bottomY))
+                scrollView.reflectScrolledClipView(clipView)
+            }
+        }
+
+        func cancelPendingScroll() {
+            pendingScrollTask?.cancel()
+            pendingScrollTask = nil
         }
     }
 }

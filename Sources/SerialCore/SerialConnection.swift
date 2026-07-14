@@ -137,7 +137,9 @@ public final class SerialConnection: @unchecked Sendable {
             }
             if count == 0 {
                 close(notify: true, reason: "デバイスとの接続が終了しました。")
-            } else if errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR {
+            } else if errno == EINTR {
+                continue
+            } else if errno != EAGAIN && errno != EWOULDBLOCK {
                 let message = String(cString: strerror(errno))
                 close(notify: true, reason: message)
             }
@@ -216,8 +218,10 @@ public final class SerialConnection: @unchecked Sendable {
             throw SerialConnectionError.configurationFailed(String(cString: strerror(errno)))
         }
 
-        options.c_cc.16 = 0 // VMIN
-        options.c_cc.17 = 1 // VTIME (0.1 seconds)
+        // With O_NONBLOCK, VMIN=1 makes an empty read return EAGAIN instead of
+        // zero. A zero result can then be treated as an actual EOF/disconnect.
+        options.c_cc.16 = 1 // VMIN
+        options.c_cc.17 = 0 // VTIME
 
         guard tcsetattr(descriptor, TCSANOW, &options) == 0 else {
             throw SerialConnectionError.configurationFailed(String(cString: strerror(errno)))

@@ -53,6 +53,49 @@ struct SerialConnectionTests {
         #expect(semaphore.wait(timeout: .now() + 1) == .success)
         #expect(received.value == expected)
     }
+
+    @Test("受信の間隔が空いても接続を維持して複数回受信できる")
+    func keepsConnectionOpenBetweenReceives() throws {
+        let terminal = try PseudoTerminal()
+        defer { terminal.close() }
+
+        let received = LockedData()
+        let receiveSemaphore = DispatchSemaphore(value: 0)
+        let closeSemaphore = DispatchSemaphore(value: 0)
+        let connection = SerialConnection(label: "multiple-receive-test")
+        defer { connection.close() }
+        connection.setHandlers(
+            onData: { data in
+                received.append(data)
+                receiveSemaphore.signal()
+            },
+            onClose: { _ in
+                closeSemaphore.signal()
+            }
+        )
+        try connection.open(configuration: SerialConfiguration(path: terminal.slavePath))
+
+        let first = Data("first\n".utf8)
+        let firstWriteCount = first.withUnsafeBytes { buffer in
+            Darwin.write(terminal.master, buffer.baseAddress, buffer.count)
+        }
+        #expect(firstWriteCount == first.count)
+        #expect(receiveSemaphore.wait(timeout: .now() + 1) == .success)
+        #expect(closeSemaphore.wait(timeout: .now() + .milliseconds(200)) == .timedOut)
+        #expect(connection.isOpen)
+
+        let second = Data("second\n".utf8)
+        let secondWriteCount = second.withUnsafeBytes { buffer in
+            Darwin.write(terminal.master, buffer.baseAddress, buffer.count)
+        }
+        #expect(secondWriteCount == second.count)
+        #expect(receiveSemaphore.wait(timeout: .now() + 1) == .success)
+
+        var expected = first
+        expected.append(second)
+        #expect(received.value == expected)
+        #expect(connection.isOpen)
+    }
 }
 
 private final class LockedData: @unchecked Sendable {
@@ -68,6 +111,12 @@ private final class LockedData: @unchecked Sendable {
     func set(_ data: Data) {
         lock.lock()
         storage = data
+        lock.unlock()
+    }
+
+    func append(_ data: Data) {
+        lock.lock()
+        storage.append(data)
         lock.unlock()
     }
 }
