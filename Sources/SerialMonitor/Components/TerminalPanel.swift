@@ -4,6 +4,7 @@ import SwiftUI
 
 struct TerminalPanel: View {
     @ObservedObject var session: SerialSession
+    @ObservedObject var commandStore: SendCommandStore
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,12 +27,73 @@ struct TerminalPanel: View {
             .frame(height: 42)
             Divider()
 
+            searchBar
+            Divider()
+
             logView
 
             Divider()
-            SendBar(session: session)
+            SendBar(session: session, commandStore: commandStore)
         }
         .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("ASCII / HEXを検索", text: $session.logSearchText)
+                    .textFieldStyle(.plain)
+                if !session.logSearchText.isEmpty {
+                    Button {
+                        session.logSearchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("検索を消去")
+                }
+            }
+            .padding(.horizontal, 9)
+            .frame(maxWidth: 330)
+            .frame(height: 26)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            }
+
+            Picker("方向", selection: $session.logDirectionFilter) {
+                ForEach(LogDirectionFilter.allCases) { filter in
+                    Text(filter.displayName).tag(filter)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 250)
+
+            Toggle("一致のみ", isOn: $session.showOnlySearchMatches)
+                .toggleStyle(.checkbox)
+                .disabled(trimmedSearchText.isEmpty)
+
+            Spacer()
+
+            if !trimmedSearchText.isEmpty {
+                Text("\(matchingEntryCount)件一致")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            } else if session.logDirectionFilter != .all {
+                Text("\(directionFilteredEntries.count)件")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+        .font(.callout)
+        .padding(.horizontal, 16)
+        .frame(height: 42)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     @ViewBuilder
@@ -75,21 +137,57 @@ struct TerminalPanel: View {
 
     private func formattedLog(mode: DataDisplayMode) -> NSAttributedString {
         TerminalAttributedFormatter.make(
-            entries: session.entries,
+            entries: visibleEntries,
             mode: mode,
             showTimestamps: session.showTimestamps,
             showDirections: session.showDirections,
-            showControlCodeChips: session.showControlCodeChips
+            showControlCodeChips: session.showControlCodeChips,
+            searchQuery: trimmedSearchText,
+            emptyMessage: session.entries.isEmpty
+                ? "ポートへ接続すると、ここに受信データが表示されます。"
+                : "条件に一致する通信ログはありません。"
         )
+    }
+
+    private var trimmedSearchText: String {
+        session.logSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var directionFilteredEntries: [SerialLogEntry] {
+        session.entries.filter { session.logDirectionFilter.includes($0.direction) }
+    }
+
+    private var matchingEntries: [SerialLogEntry] {
+        guard !trimmedSearchText.isEmpty else { return directionFilteredEntries }
+        return directionFilteredEntries.filter {
+            SerialDataFormatter.matchesSearch(data: $0.data, query: trimmedSearchText)
+        }
+    }
+
+    private var visibleEntries: [SerialLogEntry] {
+        if session.showOnlySearchMatches, !trimmedSearchText.isEmpty {
+            return matchingEntries
+        }
+        return directionFilteredEntries
+    }
+
+    private var matchingEntryCount: Int {
+        matchingEntries.count
     }
 }
 
 private struct SendBar: View {
     @ObservedObject var session: SerialSession
+    @ObservedObject var commandStore: SendCommandStore
+    @State private var isShowingPresetAlert = false
+    @State private var presetName = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
+                historyMenu
+                presetMenu
+
                 TextField(
                     session.sendFormat == .ascii
                         ? "送信データを入力…"
@@ -132,6 +230,106 @@ private struct SendBar: View {
         }
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
+        .alert("定型コマンドを登録", isPresented: $isShowingPresetAlert) {
+            TextField("名前", text: $presetName)
+            Button("キャンセル", role: .cancel) {}
+            Button("登録") {
+                commandStore.add(
+                    name: presetName,
+                    text: session.sendText,
+                    format: session.sendFormat,
+                    lineEnding: session.lineEnding
+                )
+            }
+            .disabled(presetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("現在の入力内容・送信形式・改行コードを保存します。")
+        }
+    }
+
+    private var historyMenu: some View {
+        Menu {
+            if session.sendHistory.isEmpty {
+                Text("送信履歴はありません")
+            } else {
+                ForEach(session.sendHistory) { item in
+                    Button(historyTitle(item)) {
+                        session.applySendItem(
+                            text: item.text,
+                            format: item.format,
+                            lineEnding: item.lineEnding
+                        )
+                    }
+                }
+                Divider()
+                Button("履歴を消去", role: .destructive, action: session.clearSendHistory)
+            }
+        } label: {
+            Image(systemName: "clock.arrow.circlepath")
+                .frame(width: 22, height: 22)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("送信履歴")
+    }
+
+    private var presetMenu: some View {
+        Menu {
+            if commandStore.presets.isEmpty {
+                Text("定型コマンドはありません")
+            } else {
+                ForEach(commandStore.presets) { preset in
+                    Button(preset.name) {
+                        session.applySendItem(
+                            text: preset.text,
+                            format: preset.format,
+                            lineEnding: preset.lineEnding
+                        )
+                    }
+                }
+                Divider()
+            }
+
+            Button("現在の入力を登録…") {
+                presetName = suggestedPresetName
+                isShowingPresetAlert = true
+            }
+            .disabled(session.sendText.isEmpty)
+
+            if !commandStore.presets.isEmpty {
+                Menu("定型コマンドを削除") {
+                    ForEach(commandStore.presets) { preset in
+                        Button(preset.name, role: .destructive) {
+                            commandStore.remove(preset)
+                        }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "star")
+                .frame(width: 22, height: 22)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("定型コマンド")
+    }
+
+    private func historyTitle(_ item: SendHistoryEntry) -> String {
+        let oneLine = item.text
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        let body = oneLine.count > 42 ? String(oneLine.prefix(42)) + "…" : oneLine
+        let ending = item.format == .ascii && item.lineEnding != .none
+            ? " + \(item.lineEnding.displayName)"
+            : ""
+        return "[\(item.format.displayName)] \(body)\(ending)"
+    }
+
+    private var suggestedPresetName: String {
+        let oneLine = session.sendText
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+        return oneLine.count > 24 ? String(oneLine.prefix(24)) + "…" : oneLine
     }
 }
 
@@ -142,7 +340,9 @@ private enum TerminalAttributedFormatter {
         mode: DataDisplayMode,
         showTimestamps: Bool,
         showDirections: Bool,
-        showControlCodeChips: Bool
+        showControlCodeChips: Bool,
+        searchQuery: String,
+        emptyMessage: String
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
         let baseFont = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
@@ -183,6 +383,7 @@ private enum TerminalAttributedFormatter {
                 ))
             }
 
+            let bodyStart = result.length
             if showControlCodeChips, mode == .ascii {
                 let endsWithLineBreak = appendASCIIWithControlCodeChips(
                     entry.data,
@@ -204,11 +405,17 @@ private enum TerminalAttributedFormatter {
                     result.append(NSAttributedString(string: "\n", attributes: bodyAttributes))
                 }
             }
+            highlightSearch(
+                in: result,
+                range: NSRange(location: bodyStart, length: result.length - bodyStart),
+                query: searchQuery,
+                mode: mode
+            )
         }
 
         if entries.isEmpty {
             result.append(NSAttributedString(
-                string: "ポートへ接続すると、ここに受信データが表示されます。",
+                string: emptyMessage,
                 attributes: [
                     .font: baseFont,
                     .foregroundColor: NSColor.tertiaryLabelColor
@@ -216,6 +423,51 @@ private enum TerminalAttributedFormatter {
             ))
         }
         return result
+    }
+
+    private static func highlightSearch(
+        in result: NSMutableAttributedString,
+        range: NSRange,
+        query: String,
+        mode: DataDisplayMode
+    ) {
+        guard !query.isEmpty, range.length > 0 else { return }
+
+        var queries = [query]
+        if mode == .hex, let compact = SerialDataFormatter.normalizedHexSearchQuery(query) {
+            queries.append(stride(from: 0, to: compact.count, by: 2).map { index in
+                    let start = compact.index(compact.startIndex, offsetBy: index)
+                    let end = compact.index(start, offsetBy: 2)
+                    return String(compact[start..<end])
+            }.joined(separator: " "))
+        }
+
+        let text = result.string as NSString
+        var highlightedRanges = Set<String>()
+        for candidate in queries where !candidate.isEmpty {
+            var remainingRange = range
+            while remainingRange.length > 0 {
+                let found = text.range(
+                    of: candidate,
+                    options: .caseInsensitive,
+                    range: remainingRange
+                )
+                guard found.location != NSNotFound else { break }
+                let key = "\(found.location):\(found.length)"
+                if highlightedRanges.insert(key).inserted {
+                    result.addAttributes([
+                        .backgroundColor: NSColor.systemYellow.withAlphaComponent(0.42),
+                        .foregroundColor: NSColor.labelColor
+                    ], range: found)
+                }
+                let nextLocation = found.location + max(found.length, 1)
+                let rangeEnd = range.location + range.length
+                remainingRange = NSRange(
+                    location: nextLocation,
+                    length: max(0, rangeEnd - nextLocation)
+                )
+            }
+        }
     }
 
     private static func appendASCIIWithControlCodeChips(

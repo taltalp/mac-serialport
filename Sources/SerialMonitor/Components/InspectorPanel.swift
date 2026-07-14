@@ -11,6 +11,25 @@ struct InspectorPanel: View {
                 Text("表示・通信設定")
                     .font(.title3.bold())
 
+                GroupBox("接続・USBデバイス") {
+                    VStack(alignment: .leading, spacing: 11) {
+                        Toggle("自動再接続", isOn: $session.autoReconnect)
+                            .help("同じUSB機器が再び接続されたときに自動でポートを開きます")
+
+                        Divider()
+
+                        if let info = session.currentPortInfo {
+                            deviceInfo(info)
+                        } else {
+                            Text("ポートを選択するとデバイス情報を表示します")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+                }
+
                 GroupBox("表示") {
                     VStack(alignment: .leading, spacing: 13) {
                         Picker("表示形式", selection: $session.displayMode) {
@@ -102,6 +121,45 @@ struct InspectorPanel: View {
                 }
             }
         )
+    }
+
+    @ViewBuilder
+    private func deviceInfo(_ info: SerialPortInfo) -> some View {
+        LabeledContent("デバイス") {
+            Text(info.deviceName)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(info.deviceName)
+        }
+        if let manufacturer = info.manufacturer {
+            LabeledContent("メーカー") {
+                Text(manufacturer)
+                    .lineLimit(1)
+                    .help(manufacturer)
+            }
+        }
+        if let vendorProductText = info.vendorProductText {
+            LabeledContent("VID:PID", value: vendorProductText)
+        }
+        if let serialNumber = info.serialNumber {
+            LabeledContent("シリアル") {
+                Text(serialNumber)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(serialNumber)
+            }
+        }
+        if let locationID = info.locationID {
+            LabeledContent("接続位置", value: String(format: "0x%08X", locationID))
+        }
+        LabeledContent("ポート") {
+            Text(info.path)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(info.path)
+        }
+        .font(.callout)
+        .textSelection(.enabled)
     }
 
     private func chooseLogFile() {

@@ -65,4 +65,25 @@ struct DataFormattingTests {
         #expect(SerialDataFormatter.controlCodeLabel(for: 0x7F) == "DEL")
         #expect(SerialDataFormatter.controlCodeLabel(for: 0x41) == nil)
     }
+
+    @Test("検索はASCIIの大文字小文字を区別しない")
+    func searchASCII() {
+        let data = Data("Arduino Ready".utf8)
+        #expect(SerialDataFormatter.matchesSearch(data: data, query: "arduino"))
+        #expect(!SerialDataFormatter.matchesSearch(data: data, query: "error"))
+    }
+
+    @Test("検索は空白や0x接頭辞が異なるHEX列も見つける")
+    func searchHex() {
+        let data = Data([0x7E, 0x00, 0xFF, 0x0D, 0x0A])
+        #expect(SerialDataFormatter.matchesSearch(data: data, query: "00 FF"))
+        #expect(SerialDataFormatter.matchesSearch(data: data, query: "0xFF0D"))
+        #expect(!SerialDataFormatter.matchesSearch(data: data, query: "AB CD"))
+    }
+
+    @Test("検索は制御コード名にも対応する")
+    func searchControlCodeLabel() {
+        #expect(SerialDataFormatter.matchesSearch(data: Data([0x0D, 0x0A]), query: "CR LF"))
+        #expect(!SerialDataFormatter.matchesSearch(data: Data([0xCF]), query: "CR LF"))
+    }
 }

@@ -132,6 +132,44 @@ public enum SerialDataFormatter {
         return nil
     }
 
+    public static func matchesSearch(data: Data, query: String) -> Bool {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+
+        if asciiDisplayString(from: data).localizedCaseInsensitiveContains(query) {
+            return true
+        }
+        if hexString(from: data).localizedCaseInsensitiveContains(query) {
+            return true
+        }
+
+        let controlLabels = data.compactMap(controlCodeLabel).joined(separator: " ")
+        if controlLabels.localizedCaseInsensitiveContains(query) {
+            return true
+        }
+
+        guard let compactQuery = normalizedHexSearchQuery(query) else { return false }
+        let compactData = hexString(from: data).replacingOccurrences(of: " ", with: "")
+        return compactData.contains(compactQuery)
+    }
+
+    public static func normalizedHexSearchQuery(_ query: String) -> String? {
+        let withoutPrefixes = query.replacingOccurrences(
+            of: "0x",
+            with: "",
+            options: .caseInsensitive
+        )
+        let allowedSeparators = CharacterSet.whitespacesAndNewlines
+            .union(CharacterSet(charactersIn: ",:-_"))
+        guard withoutPrefixes.unicodeScalars.allSatisfy({ scalar in
+            scalar.properties.isHexDigit || allowedSeparators.contains(scalar)
+        }) else { return nil }
+
+        let compact = withoutPrefixes.filter(\.isHexDigit).uppercased()
+        guard compact.count >= 2, compact.count.isMultiple(of: 2) else { return nil }
+        return compact
+    }
+
     public static func timestamp(_ date: Date) -> String {
         let components = Calendar.current.dateComponents(
             [.hour, .minute, .second, .nanosecond],

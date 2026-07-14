@@ -5,7 +5,8 @@ import SerialCore
 final class AppModel: ObservableObject {
     @Published private(set) var sessions: [SerialSession] = []
     @Published var selectedSessionID: UUID?
-    @Published private(set) var availablePorts: [String] = []
+    @Published private(set) var availablePorts: [SerialPortInfo] = []
+    let sendCommandStore = SendCommandStore()
 
     init() {
         refreshPorts()
@@ -36,10 +37,11 @@ final class AppModel: ObservableObject {
     }
 
     func refreshPorts() {
-        availablePorts = SerialPortDiscovery.availablePorts()
+        availablePorts = SerialPortDiscovery.availablePortInfos()
         for session in sessions where session.configuration.path.isEmpty && !session.isConnected {
-            session.configuration.path = firstUnusedPort() ?? availablePorts.first ?? ""
+            session.configuration.path = firstUnusedPort() ?? availablePorts.first?.path ?? ""
         }
+        sessions.forEach { $0.updateAvailablePorts(availablePorts) }
     }
 
     func closeAll() {
@@ -48,6 +50,6 @@ final class AppModel: ObservableObject {
 
     private func firstUnusedPort() -> String? {
         let used = Set(sessions.map(\.configuration.path).filter { !$0.isEmpty })
-        return availablePorts.first { !used.contains($0) } ?? availablePorts.first
+        return availablePorts.first { !used.contains($0.path) }?.path ?? availablePorts.first?.path
     }
 }

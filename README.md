@@ -13,6 +13,8 @@ A lightweight native macOS serial terminal for Arduino boards, microcontrollers,
 ## Features
 
 - Automatic discovery and refresh of `/dev/cu.*` serial ports
+- USB device details including product, manufacturer, VID/PID, serial number, and connection location
+- Optional automatic reconnection that follows the same USB device even if its port path changes
 - Baud rate, data bits, parity, stop bits, and flow-control settings
 - LF, CR, CR+LF, or no line ending for ASCII transmission
 - ASCII, hexadecimal, and side-by-side ASCII + HEX display modes
@@ -21,6 +23,8 @@ A lightweight native macOS serial terminal for Arduino boards, microcontrollers,
 - Optional control-code chips for CR, LF, TAB, NUL, ESC, and other C0 bytes
 - Real-time log recording to a user-selected file
 - Multiple simultaneous serial connections in separate tabs
+- ASCII/HEX log search, RX/TX/SYS direction filters, match highlighting, and match-only display
+- Per-tab send history and persistent reusable command presets
 - Per-tab connection and display settings
 - RX/TX byte counters, automatic scrolling, and log clearing
 - Batched UI updates for responsive high-frequency input
@@ -124,6 +128,19 @@ The selected line ending is appended automatically.
 
 Line endings are not appended automatically in HEX mode, so include the required bytes explicitly.
 
+### Search and filter the communication log
+
+Use the search field above the log to find either ASCII text or hexadecimal byte sequences. Searches are case-insensitive, and hexadecimal searches accept spaces and `0x` prefixes. Use the segmented control to show all entries, RX, TX, or system messages, and enable **Matches only** to hide non-matching entries.
+
+### Reuse commands
+
+- Open the history menu next to the send field to restore one of the last 50 successfully sent commands in the current tab.
+- Open the star menu to save the current input as a named command preset. Presets retain the input format and line-ending setting and are available in every tab after relaunching the app.
+
+### Enable automatic reconnection
+
+Enable **Automatic reconnection** in the right-side connection panel. If the device is unplugged or reset, the app waits for the same USB device and reopens it automatically. A USB serial number is used when available; otherwise the USB VID/PID and physical connection location are used.
+
 ### Record a real-time log
 
 1. Enable **Save to log** in the right-side panel.
@@ -167,12 +184,14 @@ export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 swift test --disable-sandbox
 ```
 
-The current suite contains nine tests covering:
+The current suite contains 18 tests covering:
 
 - ASCII and hexadecimal input conversion
 - Line-ending behavior
 - ASCII and HEX display formatting
 - `/dev/cu.*` port filtering
+- USB device identity matching across port-path changes
+- ASCII, hexadecimal, and control-code searches
 - Real-time log persistence
 - Bidirectional pseudo-terminal communication
 

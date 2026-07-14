@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ConnectionBar: View {
     @ObservedObject var session: SerialSession
-    let availablePorts: [String]
+    let availablePorts: [SerialPortInfo]
     let onRefresh: () -> Void
 
     var body: some View {
@@ -17,12 +17,12 @@ struct ConnectionBar: View {
                         if session.configuration.path.isEmpty {
                             Text("ポートを選択").tag("")
                         }
-                        ForEach(portChoices, id: \.self) { path in
-                            Text(path).tag(path)
+                        ForEach(portChoices) { port in
+                            Text(port.menuTitle).tag(port.path)
                         }
                     }
                     .labelsHidden()
-                    .frame(minWidth: 260)
+                    .frame(minWidth: 310)
                 }
 
                 SettingPicker(title: "ボーレート", width: 120) {
@@ -85,11 +85,13 @@ struct ConnectionBar: View {
         }
     }
 
-    private var portChoices: [String] {
-        if session.configuration.path.isEmpty || availablePorts.contains(session.configuration.path) {
+    private var portChoices: [SerialPortInfo] {
+        if session.configuration.path.isEmpty
+            || availablePorts.contains(where: { $0.path == session.configuration.path }) {
             return availablePorts
         }
-        return [session.configuration.path] + availablePorts
+        return [session.currentPortInfo ?? SerialPortInfo(path: session.configuration.path)]
+            + availablePorts
     }
 }
 

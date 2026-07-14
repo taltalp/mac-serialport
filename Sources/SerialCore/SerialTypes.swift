@@ -32,7 +32,7 @@ public enum SerialFlowControl: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-public enum LineEnding: String, CaseIterable, Identifiable, Sendable {
+public enum LineEnding: String, CaseIterable, Codable, Identifiable, Sendable {
     case none
     case lf
     case cr
@@ -75,7 +75,7 @@ public enum DataDisplayMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-public enum SendFormat: String, CaseIterable, Identifiable, Sendable {
+public enum SendFormat: String, CaseIterable, Codable, Identifiable, Sendable {
     case ascii
     case hex
 

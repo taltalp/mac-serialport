@@ -17,7 +17,10 @@ struct ContentView: View {
                     SessionTabBar(model: model)
                     Divider()
                     HStack(spacing: 0) {
-                        TerminalPanel(session: session)
+                        TerminalPanel(
+                            session: session,
+                            commandStore: model.sendCommandStore
+                        )
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         Divider()
                         InspectorPanel(session: session)
@@ -126,7 +129,7 @@ private struct SessionTab: View {
     private var statusColor: Color {
         switch session.connectionState {
         case .connected: .green
-        case .connecting: .orange
+        case .connecting, .reconnecting: .orange
         case .failed: .red
         case .disconnected: .secondary
         }
@@ -170,7 +173,7 @@ private struct StatusBar: View {
     private var statusColor: Color {
         switch session.connectionState {
         case .connected: .green
-        case .connecting: .orange
+        case .connecting, .reconnecting: .orange
         case .failed: .red
         case .disconnected: .secondary
         }
