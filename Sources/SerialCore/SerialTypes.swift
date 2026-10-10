@@ -132,18 +132,21 @@ public struct SerialLogEntry: Identifiable, Sendable {
     public let id: UUID
     public let date: Date
     public let direction: SerialDirection
-    public let data: Data
+    public internal(set) var data: Data
+    public internal(set) var isTruncated: Bool
 
     public init(
         id: UUID = UUID(),
         date: Date = Date(),
         direction: SerialDirection,
-        data: Data
+        data: Data,
+        isTruncated: Bool = false
     ) {
         self.id = id
         self.date = date
         self.direction = direction
         self.data = data
+        self.isTruncated = isTruncated
     }
 }
 

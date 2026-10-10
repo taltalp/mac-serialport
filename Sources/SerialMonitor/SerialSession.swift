@@ -97,29 +97,18 @@ final class SerialSession: ObservableObject, Identifiable {
     private let connection: SerialConnection
     private var logWriter: RealtimeLogWriter?
     private var hasSecurityScopedAccess = false
+    private var logBuffer = SerialLogBuffer()
     private var pendingReceiveEntries: [SerialLogEntry] = []
     private var receiveFlushTask: Task<Void, Never>?
+    private var connectionGeneration: UUID?
+    private var receiveGeneration = UUID()
     private var reconnectTarget: SerialPortInfo?
     private var reconnectPending = false
-    private let maximumEntries = 5_000
     private let maximumSendHistoryEntries = 50
 
     init(defaultPort: String?) {
         configuration = SerialConfiguration(path: defaultPort ?? "")
         connection = SerialConnection()
-
-        connection.setHandlers(
-            onData: { [weak self] data in
-                Task { @MainActor [weak self] in
-                    self?.receive(data)
-                }
-            },
-            onClose: { [weak self] reason in
-                Task { @MainActor [weak self] in
-                    self?.handleUnexpectedClose(reason)
-                }
-            }
-        )
     }
 
     var title: String {
@@ -163,11 +152,13 @@ final class SerialSession: ObservableObject, Identifiable {
         reconnectPending = false
         reconnectTarget = currentPortInfo ?? SerialPortInfo(path: configuration.path)
         connectionState = .connecting
+        prepareConnection()
         do {
             try connection.open(configuration: configuration)
             connectionState = .connected
             recordSystemMessage("\(configuration.path)へ接続しました（\(configuration.shortDescription)）。")
         } catch {
+            closeConnection()
             let message = error.localizedDescription
             recordSystemMessage(message)
             if autoReconnect {
@@ -182,8 +173,7 @@ final class SerialSession: ObservableObject, Identifiable {
 
     func disconnect() {
         reconnectPending = false
-        connection.close()
-        flushReceivedEntries()
+        closeConnection()
         if connectionState != .disconnected {
             recordSystemMessage("接続を終了しました。")
         }
@@ -202,7 +192,6 @@ final class SerialSession: ObservableObject, Identifiable {
         }
 
         if isConnected, selectedPort == nil {
-            connection.close()
             handleUnexpectedClose("デバイスが取り外されました。")
         }
 
@@ -241,9 +230,14 @@ final class SerialSession: ObservableObject, Identifiable {
     }
 
     func clearEntries() {
+        // Keep the connection generation so an already queued close notification
+        // still applies, while discarding receive tasks from before this clear.
+        receiveGeneration = UUID()
+        installConnectionHandlers()
         receiveFlushTask?.cancel()
         receiveFlushTask = nil
         pendingReceiveEntries.removeAll(keepingCapacity: true)
+        logBuffer.removeAll()
         entries.removeAll(keepingCapacity: true)
         receivedBytes = 0
         transmittedBytes = 0
@@ -296,16 +290,55 @@ final class SerialSession: ObservableObject, Identifiable {
 
     func shutdown() {
         reconnectPending = false
-        connection.close()
-        receiveFlushTask?.cancel()
-        receiveFlushTask = nil
-        flushReceivedEntries()
+        closeConnection()
         stopLogging()
     }
 
-    private func receive(_ data: Data) {
+    private func prepareConnection() {
+        closeConnection()
+        connectionGeneration = UUID()
+        installConnectionHandlers()
+    }
+
+    private func installConnectionHandlers() {
+        guard let connectionGeneration else { return }
+        let receiveGeneration = self.receiveGeneration
+        connection.setHandlers(
+            onData: { [weak self] data in
+                let date = Date()
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          self.connectionGeneration == connectionGeneration,
+                          self.receiveGeneration == receiveGeneration
+                    else { return }
+                    self.receive(data, at: date)
+                }
+            },
+            onClose: { [weak self] reason in
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          self.connectionGeneration == connectionGeneration
+                    else { return }
+                    self.handleUnexpectedClose(reason)
+                }
+            }
+        )
+    }
+
+    private func closeConnection() {
+        // Removing handlers cannot cancel MainActor tasks already scheduled by
+        // the read queue. Invalidate their captured generations before closing.
+        connectionGeneration = nil
+        receiveGeneration = UUID()
+        connection.setHandlers(onData: nil, onClose: nil)
+        connection.close()
+        flushReceivedEntries()
+        logBuffer.finishReceiving()
+    }
+
+    private func receive(_ data: Data, at date: Date) {
         receivedBytes += data.count
-        let entry = SerialLogEntry(direction: .received, data: data)
+        let entry = SerialLogEntry(date: date, direction: .received, data: data)
         logWriter?.append(entry)
         pendingReceiveEntries.append(entry)
 
@@ -319,7 +352,7 @@ final class SerialSession: ObservableObject, Identifiable {
 
     private func handleUnexpectedClose(_ reason: String?) {
         guard connectionState != .disconnected else { return }
-        flushReceivedEntries()
+        closeConnection()
         let message = reason ?? "シリアルポートとの接続が終了しました。"
         recordSystemMessage(message)
         if autoReconnect, reconnectTarget != nil {
@@ -333,6 +366,7 @@ final class SerialSession: ObservableObject, Identifiable {
 
     private func attemptAutomaticReconnect() {
         connectionState = .connecting
+        prepareConnection()
         do {
             try connection.open(configuration: configuration)
             reconnectPending = false
@@ -340,6 +374,7 @@ final class SerialSession: ObservableObject, Identifiable {
             connectionState = .connected
             recordSystemMessage("\(configuration.path)へ自動再接続しました（\(configuration.shortDescription)）。")
         } catch {
+            closeConnection()
             connectionState = .reconnecting
         }
     }
@@ -367,10 +402,9 @@ final class SerialSession: ObservableObject, Identifiable {
     }
 
     private func append(_ entry: SerialLogEntry) {
-        entries.append(entry)
-        if entries.count > maximumEntries {
-            entries.removeFirst(entries.count - maximumEntries)
-        }
+        flushReceivedEntries()
+        logBuffer.append(entry)
+        entries = logBuffer.entries
         logWriter?.append(entry)
     }
 
@@ -379,10 +413,10 @@ final class SerialSession: ObservableObject, Identifiable {
         receiveFlushTask = nil
         guard !pendingReceiveEntries.isEmpty else { return }
 
-        entries.append(contentsOf: pendingReceiveEntries)
-        pendingReceiveEntries.removeAll(keepingCapacity: true)
-        if entries.count > maximumEntries {
-            entries.removeFirst(entries.count - maximumEntries)
+        for entry in pendingReceiveEntries {
+            logBuffer.append(entry)
         }
+        pendingReceiveEntries.removeAll(keepingCapacity: true)
+        entries = logBuffer.entries
     }
 }

@@ -20,6 +20,7 @@ A lightweight native macOS serial terminal for Arduino boards, microcontrollers,
 - ASCII, hexadecimal, and side-by-side ASCII + HEX display modes
 - ASCII and hexadecimal input modes
 - Optional receive timestamps and RX/TX direction markers
+- Received data grouped by CR, LF, or CR+LF, with each line timestamped at its first received byte
 - Optional control-code chips for CR, LF, TAB, NUL, ESC, and other C0 bytes
 - Real-time log recording to a user-selected file
 - Multiple simultaneous serial connections in separate tabs
@@ -130,6 +131,10 @@ Line endings are not appended automatically in HEX mode, so include the required
 
 ### Search and filter the communication log
 
+Received data is displayed one line per CR, LF, or CR+LF ending. Each line keeps the timestamp of the receive event containing its first byte. Data arriving in several reads is joined into the same line, and partial lines remain visible while waiting for their ending. A CR+LF pair is treated as one ending even when its bytes arrive separately. ASCII and HEX panes use the same received lines.
+
+The display keeps up to 5,000 entries and 20 MiB of data. Older entries are discarded when either limit is reached. If a single line exceeds the byte limit, its oldest bytes are omitted with a visible marker; file logging still preserves the received bytes.
+
 Use the search field above the log to find either ASCII text or hexadecimal byte sequences. Searches are case-insensitive, and hexadecimal searches accept spaces and `0x` prefixes. Use the segmented control to show all entries, RX, TX, or system messages, and enable **Matches only** to hide non-matching entries.
 
 ### Reuse commands
@@ -147,7 +152,7 @@ Enable **Automatic reconnection** in the right-side connection panel. If the dev
 2. Choose a destination file.
 3. Continue communicating normally.
 
-Each saved entry includes a timestamp, direction, printable representation, and exact hexadecimal bytes. File logging continues independently of the on-screen 5,000-event limit.
+Each saved entry includes a timestamp, direction, printable representation, and exact hexadecimal bytes. Received data is saved immediately per receive event, independently of the on-screen line grouping and 5,000-entry limit.
 
 ### Open multiple ports
 
@@ -171,6 +176,7 @@ Click the **+** button in the tab bar to create another session. Each tab owns a
 | `Sources/SerialCore` | POSIX `termios` transport, port discovery, data formatting, and real-time file logging |
 | `Sources/SerialMonitor` | SwiftUI application, tab sessions, settings panels, and AppKit terminal view |
 | `Tests/SerialCoreTests` | Data conversion, port discovery, logging, and pseudo-terminal integration tests |
+| `Tests/SerialMonitorTests` | Terminal rendering regression tests |
 | `Packaging` | App metadata and App Sandbox entitlements |
 | `scripts/build-app.sh` | Local release build and `.app` packaging |
 | `docs/images` | README screenshots |
@@ -184,10 +190,11 @@ export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 swift test --disable-sandbox
 ```
 
-The current suite contains 18 tests covering:
+The test suite covers:
 
 - ASCII and hexadecimal input conversion
 - Line-ending behavior
+- Received-line assembly across read boundaries, line timestamps, and buffer resets
 - ASCII and HEX display formatting
 - `/dev/cu.*` port filtering
 - USB device identity matching across port-path changes

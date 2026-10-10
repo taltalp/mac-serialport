@@ -11,7 +11,7 @@ struct TerminalPanel: View {
             HStack {
                 Text("通信ログ")
                     .font(.headline)
-                Text("最大5,000イベント")
+                Text("最大5,000件")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Spacer()
@@ -334,7 +334,7 @@ private struct SendBar: View {
 }
 
 @MainActor
-private enum TerminalAttributedFormatter {
+enum TerminalAttributedFormatter {
     static func make(
         entries: [SerialLogEntry],
         mode: DataDisplayMode,
@@ -383,6 +383,12 @@ private enum TerminalAttributedFormatter {
                 ))
             }
 
+            if entry.isTruncated {
+                result.append(NSAttributedString(
+                    string: "…（先頭を省略） ",
+                    attributes: prefixAttributes
+                ))
+            }
             let bodyStart = result.length
             if showControlCodeChips, mode == .ascii {
                 let endsWithLineBreak = appendASCIIWithControlCodeChips(

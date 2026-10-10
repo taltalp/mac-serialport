@@ -20,6 +20,10 @@ let package = Package(
         .testTarget(
             name: "SerialCoreTests",
             dependencies: ["SerialCore"]
+        ),
+        .testTarget(
+            name: "SerialMonitorTests",
+            dependencies: ["SerialMonitor", "SerialCore"]
         )
     ]
 )
